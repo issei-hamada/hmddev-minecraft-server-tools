@@ -1,0 +1,882 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: General Configuration
+        Parameters:
+          - AppName
+      - Label:
+          default: Network Configuration
+        Parameters:
+          - Cidr
+      - Label:
+          default: Instance Configuration
+        Parameters:
+          - AmiId
+          - InstanceType
+          - NeedInstanceSchedule
+          - StartInstance
+          - StopInstance
+          - Timezone
+      - Label:
+          default: Monitor Configuration
+        Parameters:
+          - Email
+          - LogFilePath
+          - MonitoringProccess
+          - NeedMonitoringSchedule
+          - StartMonitoring
+          - StopMonitoring
+
+Parameters:
+  Email:
+    Type: String
+    Description: Enter Email Address to send an alarm.
+    Default: user@example.com
+
+  AppName:
+    Type: String
+    Description: Enter AppName.
+    Default: minecraft
+
+  Cidr:
+    Type: String
+    Description: Enter CidrBlock.
+    Default: 192.168.0.0/16
+
+  AmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/canonical/ubuntu/server/noble/stable/current/amd64/hvm/ebs-gp3/ami-id
+
+  InstanceType:
+    Type: String
+    Default: t3.small
+    AllowedValues:
+      - t3.micro
+      - t3.small
+      - t3.medium
+
+  NeedInstanceSchedule:
+    Type: String
+    Description: If you want to run instance only while you are playing Minecraft, Enter true.
+    Default: true
+    AllowedValues:
+      - true
+      - false
+
+  StartInstance:
+    Type: String
+    Description: Enter StartInstanceSchedule. ex) cron(0 18 * * ? *)
+    Default: "cron(0 18 * * ? *)"
+
+  StopInstance:
+    Type: String
+    Description: Enter StopInstanceSchedule. ex) cron(0 6 * * ? *)
+    Default: "cron(0 3 * * ? *)"
+
+  IgnoreMonitoringSchedule:
+    Type: String
+    Description: If you're annoyed by getting an alarm every time you schedule an appointment, you can set a time to ignore the alarm. Enter true or false.
+    Default: true
+    AllowedValues:
+      - true
+      - false
+
+  StartMonitoring:
+    Type: String
+    Description: If you're annoyed by getting an alarm every time you schedule an appointment, you can set a time to ignore the alarm. Enter StartMonitoringSchedule.
+    Default: "cron(15 18 * * ? *)"
+
+  StopMonitoring:
+    Type: String
+    Description: If you're annoyed by getting an alarm every time you schedule an appointment, you can set a time to ignore the alarm. Enter StopMonitoringSchedule.
+    Default: "cron(45 2 * * ? *)"
+
+  Timezone:
+    Type: String
+    Description: Enter Timezone.
+    Default: Japan
+
+  LogFilePath:
+    Type: String
+    Description: If you build minecraft server, you no need to change path.
+    Default: /home/mcuser/minecraft/logs/latest.log
+
+  MonitoringProccess:
+    Type: String
+    Description: If you build minecraft server, you no need to change process.
+    Default: /usr/lib/jvm/java-21-openjdk-amd64/bin/java
+
+Conditions:
+  IsNeedInstanceSchedule: 
+    !Equals [true, !Ref NeedInstanceSchedule]
+
+  IsIgnoreMonitoringSchedule: 
+    !Equals [true, !Ref IgnoreMonitoringSchedule]
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref Cidr
+      EnableDnsSupport: 'true'
+      EnableDnsHostnames: 'true'
+      InstanceTenancy: default
+      Tags:
+        - Key: Name
+          Value: !Sub ${AppName}-vpc
+
+  IGW:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${AppName}-igw
+
+  AttachIGW:
+    Type: AWS::EC2::VPCGatewayAttachment
+    DependsOn: IGW
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref IGW
+
+  PubSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Select
+        - 0
+        - !Cidr
+          - !GetAtt VPC.CidrBlock
+          - 256
+          - 8
+      AvailabilityZone: !Select
+        - 0
+        - !GetAZs
+          Ref: AWS::Region
+      Tags:
+        - Key: Name
+          Value: !Sub ${AppName}-public-subnet-1
+
+  PubSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Select
+        - 1
+        - !Cidr
+          - !GetAtt VPC.CidrBlock
+          - 256
+          - 8
+      AvailabilityZone: !Select
+        - 1
+        - !GetAZs
+          Ref: AWS::Region
+      Tags:
+        - Key: Name
+          Value: !Sub ${AppName}-public-subnet-2
+
+  PubSubnet3:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Select
+        - 2
+        - !Cidr
+          - !GetAtt VPC.CidrBlock
+          - 256
+          - 8
+      AvailabilityZone: !Select
+        - 2
+        - !GetAZs
+          Ref: AWS::Region
+      Tags:
+        - Key: Name
+          Value: !Sub ${AppName}-public-subnet-3
+
+  PrivSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Select
+        - 127
+        - !Cidr
+          - !GetAtt VPC.CidrBlock
+          - 256
+          - 8
+      AvailabilityZone: !Select
+        - 0
+        - !GetAZs
+          Ref: AWS::Region
+      Tags:
+        - Key: Name
+          Value: !Sub ${AppName}-private-subnet-1
+
+  PrivSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Select
+        - 128
+        - !Cidr
+          - !GetAtt VPC.CidrBlock
+          - 256
+          - 8
+      AvailabilityZone: !Select
+        - 1
+        - !GetAZs
+          Ref: AWS::Region
+      Tags:
+        - Key: Name
+          Value: !Sub ${AppName}-private-subnet-2
+
+  PrivSubnet3:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Select
+        - 129
+        - !Cidr
+          - !GetAtt VPC.CidrBlock
+          - 256
+          - 8
+      AvailabilityZone: !Select
+        - 2
+        - !GetAZs
+          Ref: AWS::Region
+      Tags:
+        - Key: Name
+          Value: !Sub ${AppName}-private-subnet-3
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${AppName}-public-route
+
+  PublicRoute1:
+    Type: AWS::EC2::Route
+    DependsOn: AttachIGW
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref IGW
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${AppName}-private-route
+
+  PublicSubnet1Attache:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PubSubnet1
+
+  PublicSubnet2Attache:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PubSubnet2
+
+  PublicSubnet3Attache:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PubSubnet3
+
+  PrivateSubnet1Attache:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref PrivSubnet1
+
+  PrivateSubnet2Attache:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref PrivSubnet2
+
+  PrivateSubnet3Attache:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref PrivSubnet3
+
+  PublicSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${AppName}-public-security-group
+      GroupDescription: PublicSG
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: '-1'
+          FromPort: '-1'
+          ToPort: '-1'
+          CidrIp: !Ref Cidr
+        - IpProtocol: tcp
+          FromPort: '25565'
+          ToPort: '25565'
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: '-1'
+          FromPort: '-1'
+          ToPort: '-1'
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub ${AppName}-public-security-group
+
+  PrivateSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${AppName}-private-security-group
+      GroupDescription: PrivateSG
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: '-1'
+          FromPort: '-1'
+          ToPort: '-1'
+          CidrIp: !Ref Cidr
+      SecurityGroupEgress:
+        - IpProtocol: '-1'
+          FromPort: '-1'
+          ToPort: '-1'
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub ${AppName}-private-security-group
+
+  InstanceConnectSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${AppName}-instance-connect-security-group
+      GroupDescription: for Instance Connect Endpoint
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '22'
+          ToPort: '22'
+          CidrIp: !Ref Cidr
+      SecurityGroupEgress:
+        - IpProtocol: '-1'
+          FromPort: '-1'
+          ToPort: '-1'
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub ${AppName}-private-security-group
+
+  InstanceConnectEndpoint:
+    Type: AWS::EC2::InstanceConnectEndpoint
+    Properties:
+      SubnetId: !Ref PubSubnet1
+      SecurityGroupIds:
+        - !Ref InstanceConnectSG
+      Tags:
+        - Key: Name
+          Value: !Sub ${AppName}-instance-connect-endpoint
+
+  Topic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: !Sub ${AppName}-monitoring-message
+
+  Subscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Endpoint: !Ref Email
+      Protocol: email
+      TopicArn: !Ref Topic
+
+  InstanceLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/ec2/${AppName}
+      RetentionInDays: 30
+
+  CloudWatchConfig:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub ${AppName}-cloudwatch-config
+      Type: String
+      Value: !Sub
+        - |
+          {
+              "agent": {
+                  "metrics_collection_interval": 10
+              },
+              "logs": {
+                  "logs_collected": {
+                      "files": {
+                          "collect_list": [
+                              {
+                                "file_path": "${LogFilePath}",
+                                "log_group_name": "${LogGroupName}",
+                                "log_stream_name": "{instance_id}"
+                              }
+                          ]
+                      }
+                  }
+              },
+              "metrics": {
+                  "namespace": "${AppName}",
+                  "aggregation_dimensions": [
+                      [
+                          "InstanceId"
+                      ]
+                  ],
+                  "metrics_collected": {
+                      "collectd": {
+                          "metrics_aggregation_interval": 60
+                      },
+                      "procstat": [
+                        {
+                            "exe": "${MonitoringProccess}",
+                            "measurement": [
+                                "pid_count"
+                            ],
+                            "metrics_collection_interval": 60
+                        }
+                      ],
+                      "netstat": {
+                          "measurement": [
+                            "tcp_established",
+                            "tcp_close_wait"
+                          ],
+                          "metrics_collection_interval": 60
+                      },
+                      "disk": {
+                          "measurement": [
+                              "used_percent"
+                          ],
+                          "metrics_collection_interval": 60,
+                          "resources": [
+                              "/"
+                          ]
+                      },
+                      "mem": {
+                          "measurement": [
+                              "mem_used_percent"
+                          ],
+                          "metrics_collection_interval": 60
+                      },
+                      "statsd": {
+                          "metrics_aggregation_interval": 60,
+                          "metrics_collection_interval": 30,
+                          "service_address": ":8125"
+                      }
+                  }
+              }
+          }
+        - AppName: !Ref AppName
+          LogFilePath: !Ref LogFilePath
+          LogGroupName: !Ref InstanceLogGroup
+          MonitoringProccess: !Ref MonitoringProccess
+
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles:
+        - !Ref InstanceRole
+
+  NetworkInterface:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      Description: eth0 for instance
+      GroupSet:
+        - !Ref PublicSG
+      SubnetId: !Ref PubSubnet1
+      Tags:
+        - Key: Name
+          Value: !Sub ${AppName}-instance-eth0
+
+  EIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${AppName}-eip
+
+  AssociateEIP:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt EIP.AllocationId
+      NetworkInterfaceId: !Ref NetworkInterface
+
+  Instance:
+    DependsOn:
+      - CloudWatchConfig
+      - AssociateEIP
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: !Ref AmiId
+      IamInstanceProfile: !Ref InstanceProfile
+      NetworkInterfaces:
+        - NetworkInterfaceId: !Ref NetworkInterface
+          DeviceIndex: '0'
+      UserData: !Base64
+        Fn::Sub:
+          - |
+            #!/bin/bash
+            apt update
+            ## install
+            apt install openjdk-21-jdk-headless screen collectd -y
+            curl -LO https://s3.ap-northeast-1.amazonaws.com/amazoncloudwatch-agent-ap-northeast-1/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb
+            dpkg -i -E ./amazon-cloudwatch-agent.deb
+            /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c ssm:'${ParameterName}'
+            ## pre-setup
+            useradd -m -s /bin/bash mcuser
+            echo "mcuser:P@ssw0rd" | chpasswd
+            cd /home/mcuser
+            mkdir minecraft
+            cd minecraft
+            ## install server
+            wget https://piston-data.mojang.com/v1/objects/59353fb40c36d304f2035d51e7d6e6baa98dc05c/server.jar
+            java -Xmx1024M -Xms1024M -jar server.jar nogui
+            echo "eula=true" > eula.txt
+            ## create start.sh
+            cat <<EOF > start.sh
+            #!/bin/bash
+            screen -S minecraft -U -d -m java -Xmx1024M -Xms1024M -jar server.jar --nogui
+            EOF
+            chmod 755 start.sh
+            ## create stop.sh
+            cat <<EOF > stop.sh
+            #!/bin/bash
+            screen -p 0 -S minecraft -X eval 'stuff "stop\015"'
+            EOF
+            chmod 755 stop.sh
+            chown -R mcuser:mcuser ../minecraft/
+            ## create daemon
+            sudo cat <<EOF > /etc/systemd/system/minecraft.service
+            [Unit]
+            Description=Minecraft Server
+            After=network.target
+            [Service]
+            ExecStart=/home/mcuser/minecraft/start.sh
+            ExecStop=/home/mcuser/minecraft/stop.sh
+            Restart=always
+            Type=forking
+            WorkingDirectory=/home/mcuser/minecraft/
+            User=mcuser
+            Group=mcuser
+            [Install]
+            WantedBy=multi-user.target
+            EOF
+            sudo systemctl daemon-reload
+            sudo systemctl enable minecraft.service
+            sudo systemctl enable amazon-cloudwatch-agent
+            ## start process
+            sudo systemctl start minecraft.service
+            sudo systemctl start amazon-cloudwatch-agent
+          - ParameterName: !Sub ${AppName}-cloudwatch-config
+      Tags:
+        - Key: Name
+          Value: !Sub ${AppName}-instance
+
+  ProcessAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      ActionsEnabled: true
+      AlarmName: !Sub ${AppName}-a-monitoring-process-alarm-detected
+      AlarmDescription: !Sub a monitoring-process alarm is detected on ${AppName}.
+      MetricName: procstat_lookup_pid_count
+      Namespace: !Ref AppName
+      Statistic: Minimum
+      Period: 300
+      EvaluationPeriods: 2
+      DatapointsToAlarm: 2
+      Threshold: 0
+      ComparisonOperator: LessThanOrEqualToThreshold
+      TreatMissingData: missing
+      AlarmActions:
+        - !Ref Topic
+      Dimensions:
+        - Name: exe
+          Value: !Ref MonitoringProccess
+        - Name: host
+          Value:
+            Fn::Sub:
+              - ip-${1st}-${2nd}-${3rd}-${4th}
+              - 1st: !Select [0, !Split ['.', !GetAtt NetworkInterface.PrimaryPrivateIpAddress]]
+                2nd: !Select [1, !Split ['.', !GetAtt NetworkInterface.PrimaryPrivateIpAddress]]
+                3rd: !Select [2, !Split ['.', !GetAtt NetworkInterface.PrimaryPrivateIpAddress]]
+                4th: !Select [3, !Split ['.', !GetAtt NetworkInterface.PrimaryPrivateIpAddress]]
+        - Name: pid_finder
+          Value: native
+
+  SchedulerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - scheduler.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: "/"
+      Policies:
+        - PolicyName: InstanceControl
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:StartInstances
+                  - ec2:StopInstances
+                Resource:
+                  - "*"
+        - PolicyName: AlarmControl
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudwatch:EnableAlarmActions
+                  - cloudwatch:DisableAlarmActions
+                Resource:
+                  - "*"
+
+  StartInstanceSchedule:
+    Condition: IsNeedInstanceSchedule
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Description: Start EC2 Instance
+      ScheduleExpression: !Ref StartInstance
+      ScheduleExpressionTimezone: !Ref Timezone
+      FlexibleTimeWindow:
+        Mode: "OFF"
+      State: ENABLED
+      Target:
+        Arn: arn:aws:scheduler:::aws-sdk:ec2:startInstances
+        Input: !Sub |-
+          {
+            "InstanceIds": ["${Instance}"]
+          }
+        RoleArn: !GetAtt SchedulerRole.Arn
+
+  StopMonitoringSchedule:
+    Condition: IsIgnoreMonitoringSchedule
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Description: Stop EC2 Instance
+      ScheduleExpression: !Ref StopMonitoring
+      ScheduleExpressionTimezone: !Ref Timezone
+      FlexibleTimeWindow:
+        Mode: "OFF"
+      State: ENABLED
+      Target:
+        Arn: arn:aws:scheduler:::aws-sdk:cloudwatch:disableAlarmActions
+        Input: !Sub |-
+          {
+            "AlarmNames": ["${ProcessAlarm}"]
+          }
+        RoleArn: !GetAtt SchedulerRole.Arn
+
+  StopInstanceSchedule:
+    Condition: IsNeedInstanceSchedule
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Description: Stop EC2 Instance
+      ScheduleExpression: !Ref StopInstance
+      ScheduleExpressionTimezone: !Ref Timezone
+      FlexibleTimeWindow:
+        Mode: "OFF"
+      State: ENABLED
+      Target:
+        Arn: arn:aws:scheduler:::aws-sdk:ec2:stopInstances
+        Input: !Sub |-
+          {
+            "InstanceIds": ["${Instance}"]
+          }
+        RoleArn: !GetAtt SchedulerRole.Arn
+
+  StartMonitoringSchedule:
+    Condition: IsIgnoreMonitoringSchedule
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Description: Start EC2 Instance
+      ScheduleExpression: !Ref StartMonitoring
+      ScheduleExpressionTimezone: !Ref Timezone
+      FlexibleTimeWindow:
+        Mode: "OFF"
+      State: ENABLED
+      Target:
+        Arn: arn:aws:scheduler:::aws-sdk:cloudwatch:enableAlarmActions
+        Input: !Sub |-
+          {
+            "AlarmNames": ["${ProcessAlarm}"]
+          }
+        RoleArn: !GetAtt SchedulerRole.Arn
+
+  SSMDocument:
+    Type: AWS::SSM::Document
+    Properties:
+      DocumentType: Command
+      Tags:
+        - Key: DLMScriptsAccess
+          Value: 'true'
+      Content:
+        schemaVersion: '2.2'
+        description: SSM Document Template for Amazon Data Lifecycle Manager Pre/Post
+          script feature
+        parameters:
+          executionId:
+            type: String
+            default: None
+            description: (Required) Specifies the unique identifier associated with a pre
+              and/or post execution
+            allowedPattern: ^(None|[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})$
+          command:
+            type: String
+            default: dry-run
+            description: (Required) Specifies whether pre-script and/or post-script should
+              be executed.
+            allowedValues:
+              - pre-script
+              - post-script
+              - dry-run
+        mainSteps:
+          - action: aws:runShellScript
+            description: Run Database freeze/thaw commands
+            name: run_pre_post_scripts
+            precondition:
+              StringEquals:
+                - platformType
+                - Linux
+            inputs:
+              runCommand:
+                - |
+                  #!/bin/bash
+                  ###===============================================================================###
+                  ### Error Codes
+                  ###===============================================================================###
+                  # The following Error codes will inform Data Lifecycle Manager of the type of error
+                  # and help guide handling of the error.
+                  # The Error code will also be emitted via AWS Eventbridge events in the 'cause' field.
+                  # 1 Pre-script failed during execution - 201
+                  # 2 Post-script failed during execution - 202
+                  # 3 Auto thaw occurred before post-script was initiated - 203
+                  # 4 Pre-script initiated while post-script was expected - 204
+                  # 5 Post-script initiated while pre-script was expected - 205
+                  # 6 Application not ready for pre or post-script initiation - 206
+                  ###===============================================================================###
+                  ### Global variables
+                  ###===============================================================================###
+                  START=$(date +%s)
+                  # For testing this script locally, replace the below with OPERATION=$1.
+                  OPERATION={{ command }}
+                  # Add all pre-script actions to be performed within the function below
+                  execute_pre_script() {
+                      echo "INFO: Start execution of pre-script"
+                      systemctl stop minecraft.service
+                  }
+                  # Add all post-script actions to be performed within the function below
+                  execute_post_script() {
+                      echo "INFO: Start execution of post-script"
+                      systemctl start minecraft.service
+                  }
+                  # Debug logging for parameters passed to the SSM document
+                  echo "INFO: ${OPERATION} starting at $(date) with executionId: ${EXECUTION_ID}"
+                  # Based on the command parameter value execute the function that supports
+                  # pre-script/post-script operation
+                  case ${OPERATION} in
+                      pre-script)
+                          execute_pre_script
+                          ;;
+                      post-script)
+                          execute_post_script
+                          ;;
+                      dry-run)
+                          echo "INFO: dry-run option invoked - taking no action"
+                          ;;
+                      *)
+                          echo "ERROR: Invalid command parameter passed. Please use either pre-script, post-script, dry-run."
+                          exit 1 # return failure
+                          ;;
+                  esac
+                  END=$(date +%s)
+                  # Debug Log for profiling the script time
+                  echo "INFO: ${OPERATION} completed at $(date). Total runtime: $((${END} - ${START})) seconds."
+
+  DLMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - dlm.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSDataLifecycleManagerSSMFullAccess
+        - arn:aws:iam::aws:policy/service-role/AWSDataLifecycleManagerServiceRole
+
+  SnapshotLifecyclePolicy:
+    Type: AWS::DLM::LifecyclePolicy
+    Properties:
+      Description: !Sub Snapshot lifecycle policy for ${AppName}
+      ExecutionRoleArn: !GetAtt DLMRole.Arn
+      State: ENABLED
+      PolicyDetails:
+        ResourceTypes:
+          - INSTANCE
+        TargetTags:
+          - Key: Name
+            Value: !Sub ${AppName}-instance
+        Schedules:
+          - Name: !Sub ${AppName}-daily-snapshot
+            CreateRule:
+              Interval: 24
+              IntervalUnit: HOURS
+              Times:
+                - '00:00'
+              Scripts:
+                - ExecutionHandler: !Ref SSMDocument
+                  ExecutionTimeout: 60
+                  MaximumRetryCount: 2
+                  Stages:
+                    - PRE
+                    - POST
+            RetainRule:
+              Count: 14
+            CopyTags: true
+
+Outputs:
+  ElasticIp:
+    Description: Minecraft Server's IP
+    Value: !Ref EIP

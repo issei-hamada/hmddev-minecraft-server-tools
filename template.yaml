@@ -16,10 +16,17 @@ Metadata:
         Parameters:
           - AmiId
           - InstanceType
+          - MaxMemorySize
           - NeedInstanceSchedule
           - StartInstance
           - StopInstance
           - Timezone
+      - Label:
+          default: Backup Configuration
+        Parameters:
+          - CreateSnapshotTime
+          - CreateSnapshotInterval
+          - RetainSnapshotCount
       - Label:
           default: Monitor Configuration
         Parameters:
@@ -54,13 +61,23 @@ Parameters:
     Type: String
     Default: t3.small
     AllowedValues:
-      - t3.micro
       - t3.small
       - t3.medium
+      - t3.large
+      - t3.xlarge
+      - t3.2xlarge
+  
+  MaxMemorySize:
+    Type: Number
+    Description: Enter MaxMemorySize.
+    Default: 1024
+    MinValue: 1024
+    MaxValue: 16384
 
   NeedInstanceSchedule:
     Type: String
-    Description: If you want to run instance only while you are playing Minecraft, Enter true.
+    Description: If you want to run instance only while you are playing Minecraft,
+      Enter true.
     Default: true
     AllowedValues:
       - true
@@ -69,16 +86,32 @@ Parameters:
   StartInstance:
     Type: String
     Description: Enter StartInstanceSchedule. ex) cron(0 18 * * ? *)
-    Default: "cron(0 18 * * ? *)"
+    Default: cron(0 18 * * ? *)
 
   StopInstance:
     Type: String
     Description: Enter StopInstanceSchedule. ex) cron(0 6 * * ? *)
-    Default: "cron(0 3 * * ? *)"
+    Default: cron(0 3 * * ? *)
+
+  CreateSnapshotTime:
+    Type: String
+    Description: Enter CreateSnapshotTime on UTC. ex) 00:00 -> 09:00 on JST.
+    Default: 00:00
+
+  CreateSnapshotInterval:
+    Type: Number
+    Description: Enter the interval at which the next snapshot will be taken.
+    Default: 24
+
+  RetainSnapshotCount:
+    Type: Number
+    Description: Enter the number of snapshots to retain.
+    Default: 14
 
   IgnoreMonitoringSchedule:
     Type: String
-    Description: If you're annoyed by getting an alarm every time you schedule an appointment, you can set a time to ignore the alarm. Enter true or false.
+    Description: If you're annoyed by getting an alarm every time you schedule an
+      appointment, you can set a time to ignore the alarm. Enter true or false.
     Default: true
     AllowedValues:
       - true
@@ -86,13 +119,17 @@ Parameters:
 
   StartMonitoring:
     Type: String
-    Description: If you're annoyed by getting an alarm every time you schedule an appointment, you can set a time to ignore the alarm. Enter StartMonitoringSchedule.
-    Default: "cron(15 18 * * ? *)"
+    Description: If you're annoyed by getting an alarm every time you schedule an
+      appointment, you can set a time to ignore the alarm. Enter
+      StartMonitoringSchedule.
+    Default: cron(15 18 * * ? *)
 
   StopMonitoring:
     Type: String
-    Description: If you're annoyed by getting an alarm every time you schedule an appointment, you can set a time to ignore the alarm. Enter StopMonitoringSchedule.
-    Default: "cron(45 2 * * ? *)"
+    Description: If you're annoyed by getting an alarm every time you schedule an
+      appointment, you can set a time to ignore the alarm. Enter
+      StopMonitoringSchedule.
+    Default: cron(45 2 * * ? *)
 
   Timezone:
     Type: String
@@ -110,11 +147,13 @@ Parameters:
     Default: /usr/lib/jvm/java-21-openjdk-amd64/bin/java
 
 Conditions:
-  IsNeedInstanceSchedule: 
-    !Equals [true, !Ref NeedInstanceSchedule]
+  IsNeedInstanceSchedule: !Equals
+    - true
+    - !Ref NeedInstanceSchedule
 
-  IsIgnoreMonitoringSchedule: 
-    !Equals [true, !Ref IgnoreMonitoringSchedule]
+  IsIgnoreMonitoringSchedule: !Equals
+    - true
+    - !Ref IgnoreMonitoringSchedule
 
 Resources:
   VPC:
@@ -402,6 +441,30 @@ Resources:
       LogGroupName: !Sub /aws/ec2/${AppName}
       RetentionInDays: 30
 
+  MetricFilterJoinedTheGame:
+    Type: AWS::Logs::MetricFilter
+    DependsOn: InstanceLogGroup
+    Properties:
+      FilterPattern: joined the game
+      LogGroupName: !Ref InstanceLogGroup
+      MetricTransformations:
+        - MetricNamespace: !Sub ${AppName}
+          MetricName: JoinedTheGame
+          MetricValue: 1
+          Unit: Count
+
+  MetricFilterLeftTheGame:
+    Type: AWS::Logs::MetricFilter
+    DependsOn: InstanceLogGroup
+    Properties:
+      FilterPattern: left the game
+      LogGroupName: !Ref InstanceLogGroup
+      MetricTransformations:
+        - MetricNamespace: !Sub ${AppName}
+          MetricName: LeftTheGame
+          MetricValue: 1
+          Unit: Count
+
   CloudWatchConfig:
     Type: AWS::SSM::Parameter
     Properties:
@@ -565,7 +628,7 @@ Resources:
             ## create start.sh
             cat <<EOF > start.sh
             #!/bin/bash
-            screen -S minecraft -U -d -m java -Xmx1024M -Xms1024M -jar server.jar --nogui
+            screen -S minecraft -U -d -m java -Xmx1024M -Xms${MaxMemorySize}M -jar server.jar --nogui
             EOF
             chmod 755 start.sh
             ## create stop.sh
@@ -598,6 +661,7 @@ Resources:
             sudo systemctl start minecraft.service
             sudo systemctl start amazon-cloudwatch-agent
           - ParameterName: !Sub ${AppName}-cloudwatch-config
+            MaxMemorySize: !Ref MaxMemorySize
       Tags:
         - Key: Name
           Value: !Sub ${AppName}-instance
@@ -623,13 +687,28 @@ Resources:
         - Name: exe
           Value: !Ref MonitoringProccess
         - Name: host
-          Value:
-            Fn::Sub:
-              - ip-${1st}-${2nd}-${3rd}-${4th}
-              - 1st: !Select [0, !Split ['.', !GetAtt NetworkInterface.PrimaryPrivateIpAddress]]
-                2nd: !Select [1, !Split ['.', !GetAtt NetworkInterface.PrimaryPrivateIpAddress]]
-                3rd: !Select [2, !Split ['.', !GetAtt NetworkInterface.PrimaryPrivateIpAddress]]
-                4th: !Select [3, !Split ['.', !GetAtt NetworkInterface.PrimaryPrivateIpAddress]]
+          Value: !Sub
+            - ip-${1st}-${2nd}-${3rd}-${4th}
+            - 1st: !Select
+                - 0
+                - !Split
+                  - .
+                  - !GetAtt NetworkInterface.PrimaryPrivateIpAddress
+              2nd: !Select
+                - 1
+                - !Split
+                  - .
+                  - !GetAtt NetworkInterface.PrimaryPrivateIpAddress
+              3rd: !Select
+                - 2
+                - !Split
+                  - .
+                  - !GetAtt NetworkInterface.PrimaryPrivateIpAddress
+              4th: !Select
+                - 3
+                - !Split
+                  - .
+                  - !GetAtt NetworkInterface.PrimaryPrivateIpAddress
         - Name: pid_finder
           Value: native
 
@@ -639,34 +718,34 @@ Resources:
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
-        - Effect: Allow
-          Principal:
-            Service:
-            - scheduler.amazonaws.com
-          Action:
-          - sts:AssumeRole
-      Path: "/"
+          - Effect: Allow
+            Principal:
+              Service:
+                - scheduler.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
       Policies:
         - PolicyName: InstanceControl
           PolicyDocument:
-            Version: "2012-10-17"
+            Version: '2012-10-17'
             Statement:
               - Effect: Allow
                 Action:
                   - ec2:StartInstances
                   - ec2:StopInstances
                 Resource:
-                  - "*"
+                  - '*'
         - PolicyName: AlarmControl
           PolicyDocument:
-            Version: "2012-10-17"
+            Version: '2012-10-17'
             Statement:
               - Effect: Allow
                 Action:
                   - cloudwatch:EnableAlarmActions
                   - cloudwatch:DisableAlarmActions
                 Resource:
-                  - "*"
+                  - '*'
 
   StartInstanceSchedule:
     Condition: IsNeedInstanceSchedule
@@ -676,7 +755,7 @@ Resources:
       ScheduleExpression: !Ref StartInstance
       ScheduleExpressionTimezone: !Ref Timezone
       FlexibleTimeWindow:
-        Mode: "OFF"
+        Mode: 'OFF'
       State: ENABLED
       Target:
         Arn: arn:aws:scheduler:::aws-sdk:ec2:startInstances
@@ -694,7 +773,7 @@ Resources:
       ScheduleExpression: !Ref StopMonitoring
       ScheduleExpressionTimezone: !Ref Timezone
       FlexibleTimeWindow:
-        Mode: "OFF"
+        Mode: 'OFF'
       State: ENABLED
       Target:
         Arn: arn:aws:scheduler:::aws-sdk:cloudwatch:disableAlarmActions
@@ -712,7 +791,7 @@ Resources:
       ScheduleExpression: !Ref StopInstance
       ScheduleExpressionTimezone: !Ref Timezone
       FlexibleTimeWindow:
-        Mode: "OFF"
+        Mode: 'OFF'
       State: ENABLED
       Target:
         Arn: arn:aws:scheduler:::aws-sdk:ec2:stopInstances
@@ -730,7 +809,7 @@ Resources:
       ScheduleExpression: !Ref StartMonitoring
       ScheduleExpressionTimezone: !Ref Timezone
       FlexibleTimeWindow:
-        Mode: "OFF"
+        Mode: 'OFF'
       State: ENABLED
       Target:
         Arn: arn:aws:scheduler:::aws-sdk:cloudwatch:enableAlarmActions
@@ -861,10 +940,10 @@ Resources:
         Schedules:
           - Name: !Sub ${AppName}-daily-snapshot
             CreateRule:
-              Interval: 24
+              Interval: !Ref CreateSnapshotInterval
               IntervalUnit: HOURS
               Times:
-                - '00:00'
+                - !Ref CreateSnapshotTime
               Scripts:
                 - ExecutionHandler: !Ref SSMDocument
                   ExecutionTimeout: 60
@@ -873,7 +952,7 @@ Resources:
                     - PRE
                     - POST
             RetainRule:
-              Count: 14
+              Count: !Ref RetainSnapshotCount
             CopyTags: true
 
 Outputs:

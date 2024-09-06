@@ -955,6 +955,36 @@ Resources:
               Count: !Ref RetainSnapshotCount
             CopyTags: true
 
+  CloudWatchDashboard:
+      Type: "AWS::CloudWatch::Dashboard"
+      Properties:
+          DashboardName: !Sub "${AppName}-monitor"
+          DashboardBody: !Sub 
+            - "{\"widgets\":[{\"height\":8,\"width\":4,\"y\":8,\"x\":8,\"type\":\"metric\",\"properties\":{\"metrics\":[[{\"expression\":\"SUM([m1,-m2])\",\"label\":\"formula1\",\"id\":\"e1\",\"stat\":\"Sum\",\"period\":300}],[\"${AppName}\",\"JoinedTheGame\",{\"id\":\"m1\",\"visible\":false}],[\".\",\"LeftTheGame\",{\"id\":\"m2\",\"visible\":false}]],\"sparkline\":true,\"view\":\"singleValue\",\"region\":\"${AWS::Region}\",\"stat\":\"Sum\",\"period\":300,\"title\":\"current_playing_users_count\"}},{\"height\":8,\"width\":4,\"y\":8,\"x\":12,\"type\":\"metric\",\"properties\":{\"view\":\"timeSeries\",\"stacked\":false,\"metrics\":[[\"${AppName}\",\"netstat_tcp_established\",\"host\",\"ip-${1st}-${2nd}-${3rd}-${4th}\"],[\".\",\"netstat_tcp_close_wait\",\".\",\".\"]],\"region\":\"${AWS::Region}\",\"title\":\"tcp_connections\"}},{\"height\":8,\"width\":8,\"y\":0,\"x\":0,\"type\":\"metric\",\"properties\":{\"view\":\"timeSeries\",\"stacked\":false,\"metrics\":[[\"AWS/EC2\",\"CPUUtilization\",\"InstanceId\",\"${InstanceId}\"]],\"region\":\"${AWS::Region}\",\"title\":\"CPUUtilization\"}},{\"height\":8,\"width\":8,\"y\":0,\"x\":8,\"type\":\"metric\",\"properties\":{\"view\":\"timeSeries\",\"stacked\":false,\"metrics\":[[\"AWS/EC2\",\"CPUCreditUsage\",\"InstanceId\",\"${InstanceId}\"],[\".\",\"CPUCreditBalance\",\".\",\".\"]],\"region\":\"${AWS::Region}\"}},{\"height\":8,\"width\":8,\"y\":8,\"x\":0,\"type\":\"metric\",\"properties\":{\"view\":\"timeSeries\",\"stacked\":false,\"metrics\":[[\"${AppName}\",\"mem_used_percent\",\"host\",\"ip-${1st}-${2nd}-${3rd}-${4th}\"]],\"region\":\"${AWS::Region}\",\"title\":\"Memory Utilization\"}},{\"height\":8,\"width\":4,\"y\":0,\"x\":16,\"type\":\"metric\",\"properties\":{\"view\":\"timeSeries\",\"stacked\":false,\"metrics\":[[\"${AppName}\",\"disk_used_percent\",\"path\",\"/\",\"host\",\"ip-${1st}-${2nd}-${3rd}-${4th}\",\"device\",\"nvme0n1p1\",\"fstype\",\"ext4\"]],\"region\":\"${AWS::Region}\"}},{\"height\":8,\"width\":4,\"y\":8,\"x\":16,\"type\":\"metric\",\"properties\":{\"view\":\"timeSeries\",\"stacked\":false,\"metrics\":[[\"AWS/EC2\",\"NetworkIn\",\"InstanceId\",\"${InstanceId}\"],[\".\",\"NetworkOut\",\".\",\".\"]],\"region\":\"${AWS::Region}\",\"title\":\"NetworkIO\"}}]}"
+            - AppName: !Ref AppName
+              InstanceId: !Ref Instance
+              1st: !Select
+                - 0
+                - !Split
+                  - .
+                  - !GetAtt NetworkInterface.PrimaryPrivateIpAddress
+              2nd: !Select
+                - 1
+                - !Split
+                  - .
+                  - !GetAtt NetworkInterface.PrimaryPrivateIpAddress
+              3rd: !Select
+                - 2
+                - !Split
+                  - .
+                  - !GetAtt NetworkInterface.PrimaryPrivateIpAddress
+              4th: !Select
+                - 3
+                - !Split
+                  - .
+                  - !GetAtt NetworkInterface.PrimaryPrivateIpAddress
+
+
 Outputs:
   ElasticIp:
     Description: Minecraft Server's IP

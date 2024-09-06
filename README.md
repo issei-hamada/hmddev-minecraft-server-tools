@@ -17,6 +17,7 @@ A tools to create and manage minecraft server on AWS.
 
 - AWS CloudFormation コンソールより、本テンプレートを選択してデプロイする
 - 基本的に、Minecraft 1.21.1 をプレイする分にはパラメータ設定不要
+- Outputs タブに表示される IP アドレスを使えば、サーバ接続可能
 
 ## 構築リソース一覧
 
@@ -39,7 +40,7 @@ A tools to create and manage minecraft server on AWS.
 
 ### DLM を使った スナップショットの自動取得
 
-- Data Cycle Manager を使ってサーバのスナップショットを自動で取得する
+- Data Lifecycle Manager を使ってサーバのスナップショットを自動で取得する
 - 事前/事後スクリプト用の SSM Document も作成する為、Minecraft サービスを停止してからスナップショットを取得する
 - デフォルトでは1日１回、毎朝 9:00 に取得して14世代分保管する
 
